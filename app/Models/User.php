@@ -3,6 +3,8 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Models\DriverNotification;
+use App\Models\WalletTransaction;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
@@ -39,6 +41,11 @@ class User extends Authenticatable
         'account_step',
         'documents',
         'documents_status',
+        'is_banned',
+        'banned_at',
+        'banned_reason',
+        'expo_push_token',
+        'app_version_last_seen',
     ];
 
     /**
@@ -68,6 +75,8 @@ class User extends Authenticatable
             'rating' => 'float',
             'account_step' => 'integer',
             'documents' => 'array',
+            'is_banned' => 'boolean',
+            'banned_at' => 'datetime',
         ];
     }
 
@@ -86,5 +95,15 @@ class User extends Authenticatable
         return $this->hasOne(Booking::class, 'driver_id')
             ->whereIn('status', ['accepted', 'en_route', 'arrived', 'washing'])
             ->latestOfMany();
+    }
+
+    public function driverNotifications(): HasMany
+    {
+        return $this->hasMany(DriverNotification::class, 'user_id');
+    }
+
+    public function walletTransactions(): HasMany
+    {
+        return $this->hasMany(WalletTransaction::class, 'user_id');
     }
 }

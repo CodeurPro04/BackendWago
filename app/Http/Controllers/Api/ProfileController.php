@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Events\DriverUpdated;
 use App\Http\Controllers\Controller;
+use App\Models\Booking;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -12,9 +14,11 @@ class ProfileController extends Controller
 {
     public function show(User $user)
     {
+        $driverRatingMeta = $user->role === 'driver' ? $this->driverRatingMeta($user) : null;
+
         return response()->json([
-            'user' => $this->serializeUser($user),
-            'stats' => $this->statsFor($user),
+            'user' => $this->serializeUser($user, $driverRatingMeta),
+            'stats' => $this->statsFor($user, $driverRatingMeta),
         ]);
     }
 
@@ -43,10 +47,14 @@ class ProfileController extends Controller
         }
 
         $user->save();
+        if ($user->role === 'driver') {
+            event(new DriverUpdated($user->fresh()));
+        }
+        $driverRatingMeta = $user->role === 'driver' ? $this->driverRatingMeta($user->fresh()) : null;
 
         return response()->json([
-            'user' => $this->serializeUser($user->fresh()),
-            'stats' => $this->statsFor($user),
+            'user' => $this->serializeUser($user->fresh(), $driverRatingMeta),
+            'stats' => $this->statsFor($user, $driverRatingMeta),
         ]);
     }
 
@@ -64,10 +72,12 @@ class ProfileController extends Controller
         $driver->profile_status = $approved ? 'approved' : 'pending';
         $driver->account_step = $approved ? max(8, (int) $driver->account_step) : (int) $driver->account_step;
         $driver->save();
+        event(new DriverUpdated($driver->fresh()));
+        $driverRatingMeta = $this->driverRatingMeta($driver->fresh());
 
         return response()->json([
-            'user' => $this->serializeUser($driver->fresh()),
-            'stats' => $this->statsFor($driver),
+            'user' => $this->serializeUser($driver->fresh(), $driverRatingMeta),
+            'stats' => $this->statsFor($driver, $driverRatingMeta),
         ]);
     }
 
@@ -80,10 +90,14 @@ class ProfileController extends Controller
         $path = $request->file('avatar')->store('avatars', 'public');
         $user->avatar_url = Storage::url($path);
         $user->save();
+        if ($user->role === 'driver') {
+            event(new DriverUpdated($user->fresh()));
+        }
+        $driverRatingMeta = $user->role === 'driver' ? $this->driverRatingMeta($user->fresh()) : null;
 
         return response()->json([
-            'user' => $this->serializeUser($user->fresh()),
-            'stats' => $this->statsFor($user),
+            'user' => $this->serializeUser($user->fresh(), $driverRatingMeta),
+            'stats' => $this->statsFor($user, $driverRatingMeta),
         ]);
     }
 
@@ -104,10 +118,12 @@ class ProfileController extends Controller
         $driver->documents = $documents;
         $driver->documents_status = 'pending';
         $driver->save();
+        event(new DriverUpdated($driver->fresh()));
+        $driverRatingMeta = $this->driverRatingMeta($driver->fresh());
 
         return response()->json([
-            'user' => $this->serializeUser($driver->fresh()),
-            'stats' => $this->statsFor($driver),
+            'user' => $this->serializeUser($driver->fresh(), $driverRatingMeta),
+            'stats' => $this->statsFor($driver, $driverRatingMeta),
         ]);
     }
 
@@ -129,14 +145,16 @@ class ProfileController extends Controller
         $driver->profile_status = 'pending';
         $driver->account_step = max((int) $driver->account_step, 6);
         $driver->save();
+        event(new DriverUpdated($driver->fresh()));
+        $driverRatingMeta = $this->driverRatingMeta($driver->fresh());
 
         return response()->json([
-            'user' => $this->serializeUser($driver->fresh()),
-            'stats' => $this->statsFor($driver),
+            'user' => $this->serializeUser($driver->fresh(), $driverRatingMeta),
+            'stats' => $this->statsFor($driver, $driverRatingMeta),
         ]);
     }
 
-    private function statsFor(User $user): array
+    private function statsFor(User $user, ?array $driverRatingMeta = null): array
     {
         if ($user->role === 'customer') {
             $bookings = $user->customerBookings()->get();
@@ -148,15 +166,25 @@ class ProfileController extends Controller
         }
 
         $jobs = $user->driverBookings()->get();
+        $ratingMeta = $driverRatingMeta ?? $this->driverRatingMeta($user);
         return [
             'total_jobs' => $jobs->count(),
             'completed_jobs' => (int) $jobs->where('status', 'completed')->count(),
             'cashout_balance' => (int) round($jobs->where('status', 'completed')->sum('price') * 0.8),
+            'rating_average' => $ratingMeta['average'],
+            'ratings_count' => $ratingMeta['count'],
+            'reviews_count' => $ratingMeta['reviews_count'],
+            'recent_reviews' => $ratingMeta['recent_reviews'],
         ];
     }
 
-    private function serializeUser(User $user): array
+    private function serializeUser(User $user, ?array $driverRatingMeta = null): array
     {
+        $rating = (float) $user->rating;
+        if ($user->role === 'driver') {
+            $rating = ($driverRatingMeta ?? $this->driverRatingMeta($user))['average'];
+        }
+
         return [
             'id' => $user->id,
             'name' => $user->name,
@@ -170,11 +198,50 @@ class ProfileController extends Controller
             'bio' => $user->bio,
             'avatar_url' => $this->absoluteUrl($user->avatar_url),
             'membership' => $user->membership,
-            'rating' => (float) $user->rating,
+            'rating' => $rating,
             'profile_status' => $user->profile_status,
             'account_step' => (int) $user->account_step,
             'documents' => collect($user->documents ?? [])->map(fn ($url) => $this->absoluteUrl($url))->all(),
             'documents_status' => $user->documents_status,
+        ];
+    }
+
+    private function driverRatingMeta(User $driver): array
+    {
+        $ratingRow = Booking::query()
+            ->where('driver_id', $driver->id)
+            ->where('status', 'completed')
+            ->whereNotNull('customer_rating')
+            ->selectRaw('AVG(customer_rating) as avg_rating, COUNT(*) as total')
+            ->first();
+
+        $count = (int) ($ratingRow?->total ?? 0);
+        $average = $count > 0
+            ? round((float) ($ratingRow?->avg_rating ?? 0), 1)
+            : (float) ($driver->rating ?? 4.8);
+
+        $reviews = Booking::query()
+            ->with('customer:id,name')
+            ->where('driver_id', $driver->id)
+            ->where('status', 'completed')
+            ->whereNotNull('customer_rating')
+            ->whereNotNull('customer_review')
+            ->where('customer_review', '!=', '')
+            ->latest('completed_at')
+            ->limit(20)
+            ->get();
+
+        return [
+            'average' => $average,
+            'count' => $count,
+            'reviews_count' => $reviews->count(),
+            'recent_reviews' => $reviews->map(fn (Booking $booking) => [
+                'booking_id' => (int) $booking->id,
+                'customer_name' => $booking->customer?->name ?? 'Client',
+                'rating' => (int) $booking->customer_rating,
+                'review' => (string) ($booking->customer_review ?? ''),
+                'created_at' => optional($booking->completed_at ?? $booking->updated_at)->toIso8601String(),
+            ])->values()->all(),
         ];
     }
 

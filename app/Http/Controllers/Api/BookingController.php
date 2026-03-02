@@ -2,9 +2,12 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Events\BookingUpdated;
+use App\Events\DriverUpdated;
 use App\Http\Controllers\Controller;
 use App\Models\Booking;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
@@ -31,13 +34,28 @@ class BookingController extends Controller
             return response()->json(['message' => 'Solde insuffisant.'], 422);
         }
 
+        $scheduledAt = null;
+        if (!empty($validated['scheduled_at'])) {
+            try {
+                $scheduledAt = Carbon::parse($validated['scheduled_at']);
+            } catch (\Throwable $exception) {
+                return response()->json(['message' => 'Date de programmation invalide.'], 422);
+            }
+
+            if ($scheduledAt->lt(Carbon::now()->subMinutes(5))) {
+                return response()->json(['message' => 'La date de programmation est deja passee.'], 422);
+            }
+        }
+
         $booking = Booking::query()->create([
             ...$validated,
+            'scheduled_at' => $scheduledAt?->toIso8601String(),
             'customer_phone' => $customer->phone,
             'status' => 'pending',
         ]);
         $customer->wallet_balance = max(0, (int) $customer->wallet_balance - (int) $validated['price']);
         $customer->save();
+        event(new BookingUpdated($booking->fresh()));
 
         return response()->json([
             'booking' => $this->serializeBooking($booking->load(['customer', 'driver'])),
@@ -70,17 +88,34 @@ class BookingController extends Controller
 
     public function cancel(Booking $booking, Request $request)
     {
-        if (in_array($booking->status, ['completed', 'cancelled'], true)) {
-            return response()->json(['message' => 'Impossible d annuler cette demande.'], 422);
-        }
-
         $validated = $request->validate([
+            'customer_id' => ['required', 'integer', 'exists:users,id'],
             'reason' => ['nullable', 'string', 'max:255'],
         ]);
+
+        $customer = User::query()
+            ->where('id', $validated['customer_id'])
+            ->where('role', 'customer')
+            ->first();
+        if (!$customer) {
+            return response()->json(['message' => 'Client non valide.'], 403);
+        }
+
+        if ((int) $booking->customer_id !== (int) $customer->id) {
+            return response()->json(['message' => 'Reservation non autorisee pour ce client.'], 403);
+        }
+
+        $cancellableStatuses = ['pending', 'accepted', 'en_route'];
+        if (!in_array($booking->status, $cancellableStatuses, true)) {
+            return response()->json([
+                'message' => 'Impossible d annuler: la mission a deja demarre ou est terminee.',
+            ], 422);
+        }
 
         $booking->status = 'cancelled';
         $booking->cancelled_reason = $validated['reason'] ?? 'cancelled_by_customer';
         $booking->save();
+        event(new BookingUpdated($booking->fresh()));
 
         return response()->json([
             'booking' => $this->serializeBooking($booking->load(['customer', 'driver'])),
@@ -102,13 +137,22 @@ class BookingController extends Controller
         if ($booking->status !== 'completed') {
             return response()->json(['message' => 'La note est disponible apres completion.'], 422);
         }
+        if ($booking->customer_rating !== null) {
+            return response()->json(['message' => 'Cette mission a deja ete notee.'], 422);
+        }
 
         $booking->customer_rating = (int) $validated['rating'];
         $booking->customer_review = $validated['review'] ?? null;
         $booking->save();
+        $driverRatingMeta = null;
+        if ($booking->driver) {
+            $driverRatingMeta = $this->syncDriverRating($booking->driver);
+            event(new DriverUpdated($booking->driver->fresh()));
+        }
+        event(new BookingUpdated($booking->fresh()));
 
         return response()->json([
-            'booking' => $this->serializeBooking($booking->load(['customer', 'driver'])),
+            'booking' => $this->serializeBooking($booking->load(['customer', 'driver']), $driverRatingMeta),
         ]);
     }
 
@@ -131,6 +175,7 @@ class BookingController extends Controller
         $current[] = $url;
         $booking->{$column} = $current;
         $booking->save();
+        event(new BookingUpdated($booking->fresh()));
 
         return response()->json([
             'booking' => $this->serializeBooking($booking->load(['customer', 'driver'])),
@@ -138,8 +183,13 @@ class BookingController extends Controller
         ]);
     }
 
-    private function serializeBooking(Booking $booking): array
+    private function serializeBooking(Booking $booking, ?array $driverRatingMeta = null): array
     {
+        $ratingMeta = null;
+        if ($booking->driver) {
+            $ratingMeta = $driverRatingMeta ?? $this->driverRatingSummary($booking->driver);
+        }
+
         return [
             'id' => $booking->id,
             'status' => $booking->status,
@@ -155,6 +205,7 @@ class BookingController extends Controller
             'customer_review' => $booking->customer_review,
             'before_photos' => $booking->before_photos ?? [],
             'after_photos' => $booking->after_photos ?? [],
+            'cancelled_reason' => $booking->cancelled_reason,
             'created_at' => optional($booking->created_at)->toIso8601String(),
             'customer' => [
                 'id' => $booking->customer?->id,
@@ -165,9 +216,39 @@ class BookingController extends Controller
                 'id' => $booking->driver->id,
                 'name' => $booking->driver->name,
                 'phone' => $booking->driver->phone,
-                'rating' => $booking->driver->rating ?? 4.8,
+                'rating' => $ratingMeta['average'] ?? (float) ($booking->driver->rating ?? 4.8),
+                'reviews_count' => $ratingMeta['count'] ?? 0,
                 'avatar_url' => $this->absoluteUrl($booking->driver->avatar_url),
             ] : null,
+        ];
+    }
+
+    private function syncDriverRating(User $driver): array
+    {
+        $summary = $this->driverRatingSummary($driver);
+        $driver->rating = $summary['average'];
+        $driver->save();
+
+        return $summary;
+    }
+
+    private function driverRatingSummary(User $driver): array
+    {
+        $row = Booking::query()
+            ->where('driver_id', $driver->id)
+            ->where('status', 'completed')
+            ->whereNotNull('customer_rating')
+            ->selectRaw('AVG(customer_rating) as avg_rating, COUNT(*) as total')
+            ->first();
+
+        $count = (int) ($row?->total ?? 0);
+        $average = $count > 0
+            ? round((float) ($row?->avg_rating ?? 0), 1)
+            : (float) ($driver->rating ?? 4.8);
+
+        return [
+            'average' => $average,
+            'count' => $count,
         ];
     }
 
