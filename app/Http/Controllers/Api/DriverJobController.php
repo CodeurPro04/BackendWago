@@ -36,26 +36,41 @@ class DriverJobController extends Controller
             'status' => ['nullable', 'string'],
         ]);
 
-        $query = Booking::query()
+        $statusFilter = $validated['status'] ?? null;
+
+        $driverJobs = Booking::query()
             ->with(['customer', 'driver'])
-            ->where(function ($builder) use ($driver) {
-                $builder->whereNull('driver_id')
-                    ->orWhere('driver_id', $driver->id);
-            });
-
-        if (!$driver->is_available || $driver->profile_status !== 'approved') {
-            $query->where('driver_id', $driver->id);
-        }
-
-        if (!empty($validated['status'])) {
-            $query->where('status', $validated['status']);
-        }
-
-        $jobs = $query->latest('id')
-            ->limit(100)
+            ->where('driver_id', $driver->id)
+            ->when($statusFilter, fn ($query) => $query->where('status', $statusFilter))
+            ->latest('id')
+            ->limit(200)
             ->get()
-            ->filter(fn (Booking $booking) => $this->isBookingVisibleForDriver($booking, $driver->id))
-            ->take(40)
+            ->filter(fn (Booking $booking) => $this->isBookingVisibleForDriver($booking, $driver->id));
+
+        $jobs = $driverJobs;
+
+        $canSeeOpenJobs = $driver->is_available && $driver->profile_status === 'approved';
+        $shouldIncludeOpenJobs = $canSeeOpenJobs && ($statusFilter === null || $statusFilter === 'pending');
+
+        if ($shouldIncludeOpenJobs) {
+            $openJobs = Booking::query()
+                ->with(['customer', 'driver'])
+                ->whereNull('driver_id')
+                ->where('status', 'pending')
+                ->latest('id')
+                ->limit(120)
+                ->get()
+                ->filter(fn (Booking $booking) => $this->isBookingVisibleForDriver($booking, $driver->id));
+
+            $jobs = $driverJobs
+                ->concat($openJobs)
+                ->unique(fn (Booking $booking) => $booking->id)
+                ->sortByDesc('id')
+                ->values();
+        }
+
+        $jobs = $jobs
+            ->take(200)
             ->map(fn (Booking $booking) => $this->serializeJob($booking));
 
         return response()->json(['jobs' => $jobs]);
@@ -83,7 +98,7 @@ class DriverJobController extends Controller
         $driver->latitude = $validated['latitude'] ?? $driver->latitude;
         $driver->longitude = $validated['longitude'] ?? $driver->longitude;
         $driver->save();
-        event(new DriverUpdated($driver->fresh()));
+        $this->dispatchSafeEvent(new DriverUpdated($driver->fresh()));
 
         return response()->json([
             'driver' => [
@@ -132,8 +147,8 @@ class DriverJobController extends Controller
         $booking->driver_id = $driver->id;
         $booking->status = 'accepted';
         $booking->save();
-        event(new BookingUpdated($booking->fresh()));
-        event(new DriverUpdated($driver->fresh()));
+        $this->dispatchSafeEvent(new BookingUpdated($booking->fresh()));
+        $this->dispatchSafeEvent(new DriverUpdated($driver->fresh()));
 
         return response()->json(['job' => $this->serializeJob($booking->load(['customer', 'driver']))]);
     }
@@ -155,7 +170,7 @@ class DriverJobController extends Controller
 
         $booking->status = 'pending';
         $booking->save();
-        event(new BookingUpdated($booking->fresh()));
+        $this->dispatchSafeEvent(new BookingUpdated($booking->fresh()));
 
         return response()->json(['job' => $this->serializeJob($booking->load(['customer', 'driver']))]);
     }
@@ -209,8 +224,8 @@ class DriverJobController extends Controller
         }
 
         $booking->save();
-        event(new BookingUpdated($booking->fresh()));
-        event(new DriverUpdated($driver->fresh()));
+        $this->dispatchSafeEvent(new BookingUpdated($booking->fresh()));
+        $this->dispatchSafeEvent(new DriverUpdated($driver->fresh()));
 
         return response()->json(['job' => $this->serializeJob($booking->load(['customer', 'driver']))]);
     }

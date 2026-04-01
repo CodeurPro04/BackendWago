@@ -1,8 +1,25 @@
 <?php
 
+$defaultConnection = env('BROADCAST_CONNECTION');
+
+if (!$defaultConnection) {
+    $defaultConnection = 'log';
+}
+
+if (
+    $defaultConnection === 'reverb'
+    && (
+        empty(env('REVERB_APP_ID'))
+        || empty(env('REVERB_APP_KEY'))
+        || empty(env('REVERB_APP_SECRET'))
+    )
+) {
+    $defaultConnection = 'log';
+}
+
 return [
 
-    'default' => env('BROADCAST_CONNECTION', 'log'),
+    'default' => $defaultConnection,
 
     'connections' => [
 

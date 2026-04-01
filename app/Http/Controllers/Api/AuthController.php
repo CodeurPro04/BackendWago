@@ -434,7 +434,7 @@ class AuthController extends Controller
             'wallet_balance' => $user->wallet_balance,
             'is_available' => $user->is_available,
             'bio' => $user->bio,
-            'avatar_url' => $this->absoluteUrl($user->avatar_url),
+            'avatar_url' => $this->resolvedAvatarUrl($user),
             'membership' => $user->membership,
             'rating' => $user->rating,
             'profile_status' => $user->profile_status,
@@ -489,6 +489,14 @@ class AuthController extends Controller
         }
 
         return url($path);
+    }
+
+    private function resolvedAvatarUrl(User $user): ?string
+    {
+        $documents = is_array($user->documents) ? $user->documents : [];
+        $avatarPath = $user->avatar_url ?: ($documents['profile'] ?? null);
+
+        return $this->absoluteUrl($avatarPath);
     }
 
     private function blockedBanResponse(User $user)

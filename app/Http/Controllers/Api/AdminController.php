@@ -161,7 +161,7 @@ class AdminController extends Controller
                 'last_name' => $driver->last_name,
                 'phone' => $driver->phone,
                 'email' => $driver->email,
-                'avatar_url' => $this->absoluteUrl($driver->avatar_url),
+                'avatar_url' => $this->resolvedAvatarUrl($driver),
                 'profile_status' => $driver->profile_status,
                 'documents_status' => $driver->documents_status,
                 'documents' => collect($driver->documents ?? [])->map(fn ($url) => $this->absoluteUrl($url))->all(),
@@ -207,7 +207,7 @@ class AdminController extends Controller
         }
 
         $driver->save();
-        event(new DriverUpdated($driver->fresh()));
+        $this->dispatchSafeEvent(new DriverUpdated($driver->fresh()));
 
         return response()->json([
             'driver' => [
@@ -239,7 +239,7 @@ class AdminController extends Controller
             $driver->banned_reason = null;
         }
         $driver->save();
-        event(new DriverUpdated($driver->fresh()));
+        $this->dispatchSafeEvent(new DriverUpdated($driver->fresh()));
 
         return response()->json([
             'driver' => [
@@ -412,7 +412,7 @@ class AdminController extends Controller
                 'driver_ids' => !empty($validated['driver_ids']) ? array_values($validated['driver_ids']) : [],
             ],
         ]);
-        event(new AnnouncementCreated($announcement->fresh()));
+        $this->dispatchSafeEvent(new AnnouncementCreated($announcement->fresh()));
 
         return response()->json([
             'ok' => true,
@@ -441,5 +441,12 @@ class AdminController extends Controller
 
         return url($path);
     }
-}
 
+    private function resolvedAvatarUrl(User $user): ?string
+    {
+        $documents = is_array($user->documents) ? $user->documents : [];
+        $avatarPath = $user->avatar_url ?: ($documents['profile'] ?? null);
+
+        return $this->absoluteUrl($avatarPath);
+    }
+}

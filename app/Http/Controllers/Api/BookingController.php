@@ -55,7 +55,7 @@ class BookingController extends Controller
         ]);
         $customer->wallet_balance = max(0, (int) $customer->wallet_balance - (int) $validated['price']);
         $customer->save();
-        event(new BookingUpdated($booking->fresh()));
+        $this->dispatchSafeEvent(new BookingUpdated($booking->fresh()));
 
         return response()->json([
             'booking' => $this->serializeBooking($booking->load(['customer', 'driver'])),
@@ -115,7 +115,7 @@ class BookingController extends Controller
         $booking->status = 'cancelled';
         $booking->cancelled_reason = $validated['reason'] ?? 'cancelled_by_customer';
         $booking->save();
-        event(new BookingUpdated($booking->fresh()));
+        $this->dispatchSafeEvent(new BookingUpdated($booking->fresh()));
 
         return response()->json([
             'booking' => $this->serializeBooking($booking->load(['customer', 'driver'])),
@@ -147,9 +147,9 @@ class BookingController extends Controller
         $driverRatingMeta = null;
         if ($booking->driver) {
             $driverRatingMeta = $this->syncDriverRating($booking->driver);
-            event(new DriverUpdated($booking->driver->fresh()));
+            $this->dispatchSafeEvent(new DriverUpdated($booking->driver->fresh()));
         }
-        event(new BookingUpdated($booking->fresh()));
+        $this->dispatchSafeEvent(new BookingUpdated($booking->fresh()));
 
         return response()->json([
             'booking' => $this->serializeBooking($booking->load(['customer', 'driver']), $driverRatingMeta),
@@ -175,7 +175,7 @@ class BookingController extends Controller
         $current[] = $url;
         $booking->{$column} = $current;
         $booking->save();
-        event(new BookingUpdated($booking->fresh()));
+        $this->dispatchSafeEvent(new BookingUpdated($booking->fresh()));
 
         return response()->json([
             'booking' => $this->serializeBooking($booking->load(['customer', 'driver'])),
@@ -218,7 +218,7 @@ class BookingController extends Controller
                 'phone' => $booking->driver->phone,
                 'rating' => $ratingMeta['average'] ?? (float) ($booking->driver->rating ?? 4.8),
                 'reviews_count' => $ratingMeta['count'] ?? 0,
-                'avatar_url' => $this->absoluteUrl($booking->driver->avatar_url),
+                'avatar_url' => $this->resolvedAvatarUrl($booking->driver),
             ] : null,
         ];
     }
@@ -263,5 +263,13 @@ class BookingController extends Controller
         }
 
         return url($path);
+    }
+
+    private function resolvedAvatarUrl(User $user): ?string
+    {
+        $documents = is_array($user->documents) ? $user->documents : [];
+        $avatarPath = $user->avatar_url ?: ($documents['profile'] ?? null);
+
+        return $this->absoluteUrl($avatarPath);
     }
 }

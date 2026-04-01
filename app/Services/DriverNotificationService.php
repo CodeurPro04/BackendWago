@@ -7,10 +7,13 @@ use App\Models\Booking;
 use App\Models\DriverNotification;
 use App\Models\User;
 use App\Models\WalletTransaction;
+use App\Support\DispatchesSafeEvents;
 use Illuminate\Support\Facades\Http;
 
 class DriverNotificationService
 {
+    use DispatchesSafeEvents;
+
     private const COMMISSION_RATE = 0.2;
 
     public function createNotification(
@@ -29,7 +32,7 @@ class DriverNotificationService
         ]);
 
         $this->sendExpoPush($driver, $title, $body, $data);
-        event(new DriverInboxUpdated($driver, 'notification_created'));
+        $this->dispatchSafeEvent(new DriverInboxUpdated($driver, 'notification_created'));
 
         return $notification;
     }
@@ -122,7 +125,7 @@ class DriverNotificationService
                 'route' => '/(tabs)/wallet',
             ]
         );
-        event(new DriverInboxUpdated($driver, 'wallet_transaction_created'));
+        $this->dispatchSafeEvent(new DriverInboxUpdated($driver, 'wallet_transaction_created'));
 
         return $transaction;
     }

@@ -48,7 +48,7 @@ class ProfileController extends Controller
 
         $user->save();
         if ($user->role === 'driver') {
-            event(new DriverUpdated($user->fresh()));
+            $this->dispatchSafeEvent(new DriverUpdated($user->fresh()));
         }
         $driverRatingMeta = $user->role === 'driver' ? $this->driverRatingMeta($user->fresh()) : null;
 
@@ -72,7 +72,7 @@ class ProfileController extends Controller
         $driver->profile_status = $approved ? 'approved' : 'pending';
         $driver->account_step = $approved ? max(8, (int) $driver->account_step) : (int) $driver->account_step;
         $driver->save();
-        event(new DriverUpdated($driver->fresh()));
+        $this->dispatchSafeEvent(new DriverUpdated($driver->fresh()));
         $driverRatingMeta = $this->driverRatingMeta($driver->fresh());
 
         return response()->json([
@@ -91,7 +91,7 @@ class ProfileController extends Controller
         $user->avatar_url = Storage::url($path);
         $user->save();
         if ($user->role === 'driver') {
-            event(new DriverUpdated($user->fresh()));
+            $this->dispatchSafeEvent(new DriverUpdated($user->fresh()));
         }
         $driverRatingMeta = $user->role === 'driver' ? $this->driverRatingMeta($user->fresh()) : null;
 
@@ -116,9 +116,12 @@ class ProfileController extends Controller
         $documents = $driver->documents ?? [];
         $documents[$validated['type']] = Storage::url($path);
         $driver->documents = $documents;
+        if ($validated['type'] === 'profile') {
+            $driver->avatar_url = $documents[$validated['type']];
+        }
         $driver->documents_status = 'pending';
         $driver->save();
-        event(new DriverUpdated($driver->fresh()));
+        $this->dispatchSafeEvent(new DriverUpdated($driver->fresh()));
         $driverRatingMeta = $this->driverRatingMeta($driver->fresh());
 
         return response()->json([
@@ -145,7 +148,7 @@ class ProfileController extends Controller
         $driver->profile_status = 'pending';
         $driver->account_step = max((int) $driver->account_step, 6);
         $driver->save();
-        event(new DriverUpdated($driver->fresh()));
+        $this->dispatchSafeEvent(new DriverUpdated($driver->fresh()));
         $driverRatingMeta = $this->driverRatingMeta($driver->fresh());
 
         return response()->json([
@@ -196,7 +199,7 @@ class ProfileController extends Controller
             'wallet_balance' => $user->wallet_balance,
             'is_available' => $user->is_available,
             'bio' => $user->bio,
-            'avatar_url' => $this->absoluteUrl($user->avatar_url),
+            'avatar_url' => $this->resolvedAvatarUrl($user),
             'membership' => $user->membership,
             'rating' => $rating,
             'profile_status' => $user->profile_status,
@@ -256,5 +259,13 @@ class ProfileController extends Controller
         }
 
         return url($path);
+    }
+
+    private function resolvedAvatarUrl(User $user): ?string
+    {
+        $documents = is_array($user->documents) ? $user->documents : [];
+        $avatarPath = $user->avatar_url ?: ($documents['profile'] ?? null);
+
+        return $this->absoluteUrl($avatarPath);
     }
 }

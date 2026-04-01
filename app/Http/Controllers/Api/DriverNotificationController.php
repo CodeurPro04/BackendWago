@@ -40,7 +40,7 @@ class DriverNotificationController extends Controller
         if ($notification->read_at === null) {
             $notification->read_at = now();
             $notification->save();
-            event(new DriverInboxUpdated($driver, 'notification_read'));
+            $this->dispatchSafeEvent(new DriverInboxUpdated($driver, 'notification_read'));
         }
 
         return response()->json([
@@ -52,7 +52,7 @@ class DriverNotificationController extends Controller
     {
         $this->assertDriver($driver);
         $driver->driverNotifications()->whereNull('read_at')->update(['read_at' => now()]);
-        event(new DriverInboxUpdated($driver, 'notifications_all_read'));
+        $this->dispatchSafeEvent(new DriverInboxUpdated($driver, 'notifications_all_read'));
 
         return response()->json(['ok' => true]);
     }
@@ -61,7 +61,7 @@ class DriverNotificationController extends Controller
     {
         $this->assertDriver($driver);
         $driver->driverNotifications()->delete();
-        event(new DriverInboxUpdated($driver, 'notifications_cleared'));
+        $this->dispatchSafeEvent(new DriverInboxUpdated($driver, 'notifications_cleared'));
 
         return response()->json(['ok' => true]);
     }
