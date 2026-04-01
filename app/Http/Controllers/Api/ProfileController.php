@@ -27,6 +27,9 @@ class ProfileController extends Controller
         $validated = $request->validate([
             'first_name' => ['nullable', 'string', 'max:255'],
             'last_name' => ['nullable', 'string', 'max:255'],
+            'company_name' => ['nullable', 'string', 'max:255'],
+            'manager_name' => ['nullable', 'string', 'max:255'],
+            'driver_account_type' => ['nullable', Rule::in(['independent', 'company'])],
             'email' => ['nullable', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
             'phone' => ['nullable', 'string', 'max:30', Rule::unique('users', 'phone')->ignore($user->id)],
             'bio' => ['nullable', 'string', 'max:1000'],
@@ -34,17 +37,30 @@ class ProfileController extends Controller
             'is_available' => ['nullable', 'boolean'],
             'account_step' => ['nullable', 'integer', 'min:0', 'max:20'],
             'profile_status' => ['nullable', Rule::in(['pending', 'approved', 'rejected'])],
+            'pricing' => ['nullable', 'array'],
+            'pricing.compacte' => ['nullable', 'array'],
+            'pricing.compacte.exterior' => ['nullable', 'numeric', 'min:0'],
+            'pricing.compacte.interior' => ['nullable', 'numeric', 'min:0'],
+            'pricing.compacte.full' => ['nullable', 'numeric', 'min:0'],
+            'pricing.berline' => ['nullable', 'array'],
+            'pricing.berline.exterior' => ['nullable', 'numeric', 'min:0'],
+            'pricing.berline.interior' => ['nullable', 'numeric', 'min:0'],
+            'pricing.berline.full' => ['nullable', 'numeric', 'min:0'],
+            'pricing.suv' => ['nullable', 'array'],
+            'pricing.suv.exterior' => ['nullable', 'numeric', 'min:0'],
+            'pricing.suv.interior' => ['nullable', 'numeric', 'min:0'],
+            'pricing.suv.full' => ['nullable', 'numeric', 'min:0'],
         ]);
 
         foreach ($validated as $key => $value) {
             $user->{$key} = $value;
         }
 
-        $first = trim((string) ($user->first_name ?? ''));
-        $last = trim((string) ($user->last_name ?? ''));
-        if ($first !== '' || $last !== '') {
-            $user->name = trim($first.' '.$last);
+        if (array_key_exists('pricing', $validated)) {
+            $user->pricing = $this->normalizedPricing($validated['pricing']);
         }
+
+        $this->syncDisplayName($user);
 
         $user->save();
         if ($user->role === 'driver') {
@@ -108,7 +124,7 @@ class ProfileController extends Controller
         }
 
         $validated = $request->validate([
-            'type' => ['required', Rule::in(['id', 'profile', 'license', 'address', 'certificate'])],
+            'type' => ['required', Rule::in(['id', 'profile', 'license', 'address', 'certificate', 'trade_register', 'manager_id', 'manager_photo'])],
             'file' => ['required', 'file', 'max:10240'],
         ]);
 
@@ -136,7 +152,7 @@ class ProfileController extends Controller
             abort(404);
         }
 
-        $required = ['id', 'profile', 'license', 'address', 'certificate'];
+        $required = $this->requiredDriverDocuments($driver);
         $documents = $driver->documents ?? [];
         foreach ($required as $doc) {
             if (empty($documents[$doc])) {
@@ -144,9 +160,17 @@ class ProfileController extends Controller
             }
         }
 
+        if (($driver->driver_account_type ?? 'independent') === 'company' && empty(trim((string) $driver->manager_name))) {
+            return response()->json(['message' => 'Le nom du gerant est obligatoire pour une entreprise.'], 422);
+        }
+
+        if ($this->hasMissingPricing($driver->pricing)) {
+            return response()->json(['message' => 'Veuillez renseigner tous les tarifs avant la soumission.'], 422);
+        }
+
         $driver->documents_status = 'submitted';
         $driver->profile_status = 'pending';
-        $driver->account_step = max((int) $driver->account_step, 6);
+        $driver->account_step = max((int) $driver->account_step, 7);
         $driver->save();
         $this->dispatchSafeEvent(new DriverUpdated($driver->fresh()));
         $driverRatingMeta = $this->driverRatingMeta($driver->fresh());
@@ -196,6 +220,9 @@ class ProfileController extends Controller
             'phone' => $user->phone,
             'email' => $user->email,
             'role' => $user->role,
+            'driver_account_type' => $user->driver_account_type,
+            'company_name' => $user->company_name,
+            'manager_name' => $user->manager_name,
             'wallet_balance' => $user->wallet_balance,
             'is_available' => $user->is_available,
             'bio' => $user->bio,
@@ -205,6 +232,8 @@ class ProfileController extends Controller
             'profile_status' => $user->profile_status,
             'account_step' => (int) $user->account_step,
             'documents' => collect($user->documents ?? [])->map(fn ($url) => $this->absoluteUrl($url))->all(),
+            'pricing' => $this->normalizedPricing($user->pricing),
+            'required_documents' => $user->role === 'driver' ? $this->requiredDriverDocuments($user) : [],
             'documents_status' => $user->documents_status,
         ];
     }
@@ -267,5 +296,67 @@ class ProfileController extends Controller
         $avatarPath = $user->avatar_url ?: ($documents['profile'] ?? null);
 
         return $this->absoluteUrl($avatarPath);
+    }
+
+    private function requiredDriverDocuments(User $driver): array
+    {
+        if (($driver->driver_account_type ?? 'independent') === 'company') {
+            return ['profile', 'trade_register', 'manager_id', 'manager_photo'];
+        }
+
+        return ['id', 'profile', 'license', 'address', 'certificate'];
+    }
+
+    private function normalizedPricing($pricing): array
+    {
+        $base = [
+            'compacte' => ['exterior' => null, 'interior' => null, 'full' => null],
+            'berline' => ['exterior' => null, 'interior' => null, 'full' => null],
+            'suv' => ['exterior' => null, 'interior' => null, 'full' => null],
+        ];
+
+        if (!is_array($pricing)) {
+            return $base;
+        }
+
+        foreach ($base as $vehicle => $services) {
+            foreach ($services as $service => $default) {
+                $value = $pricing[$vehicle][$service] ?? $default;
+                $base[$vehicle][$service] = is_numeric($value) ? (int) round((float) $value) : null;
+            }
+        }
+
+        return $base;
+    }
+
+    private function hasMissingPricing($pricing): bool
+    {
+        foreach ($this->normalizedPricing($pricing) as $services) {
+            foreach ($services as $value) {
+                if (!is_numeric($value) || (int) $value <= 0) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private function syncDisplayName(User $user): void
+    {
+        if ($user->role === 'driver' && ($user->driver_account_type ?? 'independent') === 'company') {
+            $companyName = trim((string) ($user->company_name ?? ''));
+            if ($companyName !== '') {
+                $user->name = $companyName;
+            }
+
+            return;
+        }
+
+        $first = trim((string) ($user->first_name ?? ''));
+        $last = trim((string) ($user->last_name ?? ''));
+        if ($first !== '' || $last !== '') {
+            $user->name = trim($first.' '.$last);
+        }
     }
 }

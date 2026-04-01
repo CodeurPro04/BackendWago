@@ -159,15 +159,20 @@ class AuthController extends Controller
     public function registerWithEmail(Request $request)
     {
         $validated = $request->validate([
-            'first_name' => ['required', 'string', 'max:120'],
-            'last_name' => ['required', 'string', 'max:120'],
+            'first_name' => ['nullable', 'string', 'max:120'],
+            'last_name' => ['nullable', 'string', 'max:120'],
+            'company_name' => ['nullable', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255', 'unique:users,email'],
             'password' => ['required', 'string', 'min:8', 'regex:/[A-Z]/', 'regex:/[a-z]/', 'regex:/[0-9]/'],
             'phone' => ['nullable', 'string', 'max:30'],
             'role' => ['nullable', 'in:customer,driver'],
+            'driver_account_type' => ['nullable', 'in:independent,company'],
         ]);
 
         $role = $validated['role'] ?? 'customer';
+        $driverAccountType = $role === 'driver'
+            ? ($validated['driver_account_type'] ?? 'independent')
+            : null;
         $phoneDigits = $this->normalizeDigits((string) ($validated['phone'] ?? ''));
         if ($role === 'driver') {
             if ($phoneDigits === '') {
@@ -180,9 +185,35 @@ class AuthController extends Controller
                     'phone' => ['Numero ivoirien invalide. Utilisez 10 chiffres commencant par 01, 05 ou 07.'],
                 ]);
             }
+            if ($driverAccountType === 'company' && empty(trim((string) ($validated['company_name'] ?? '')))) {
+                throw ValidationException::withMessages([
+                    'company_name' => ['Le nom de l entreprise est obligatoire.'],
+                ]);
+            }
+            if ($driverAccountType === 'independent' && empty(trim((string) ($validated['first_name'] ?? '')))) {
+                throw ValidationException::withMessages([
+                    'first_name' => ['Le prenom est obligatoire pour un compte independant.'],
+                ]);
+            }
+            if ($driverAccountType === 'independent' && empty(trim((string) ($validated['last_name'] ?? '')))) {
+                throw ValidationException::withMessages([
+                    'last_name' => ['Le nom est obligatoire pour un compte independant.'],
+                ]);
+            }
+        } elseif (empty(trim((string) ($validated['first_name'] ?? ''))) || empty(trim((string) ($validated['last_name'] ?? '')))) {
+            throw ValidationException::withMessages([
+                'first_name' => ['Le prenom est obligatoire.'],
+                'last_name' => ['Le nom est obligatoire.'],
+            ]);
         }
+
         $email = strtolower(trim($validated['email']));
-        $name = trim($validated['first_name'].' '.$validated['last_name']);
+        $firstName = trim((string) ($validated['first_name'] ?? ''));
+        $lastName = trim((string) ($validated['last_name'] ?? ''));
+        $companyName = trim((string) ($validated['company_name'] ?? ''));
+        $name = $role === 'driver' && $driverAccountType === 'company'
+            ? $companyName
+            : trim($firstName.' '.$lastName);
         $normalizedPhone = $phoneDigits !== '' ? $this->normalizePhone('+225'.$phoneDigits) : null;
 
         if ($normalizedPhone && User::query()->where('phone', $normalizedPhone)->exists()) {
@@ -193,18 +224,21 @@ class AuthController extends Controller
 
         $user = User::query()->create([
             'name' => $name,
-            'first_name' => $validated['first_name'],
-            'last_name' => $validated['last_name'],
+            'first_name' => $firstName !== '' ? $firstName : null,
+            'last_name' => $lastName !== '' ? $lastName : null,
+            'company_name' => $companyName !== '' ? $companyName : null,
             'email' => $email,
             'phone' => $normalizedPhone,
             'password' => $validated['password'],
             'role' => $role,
+            'driver_account_type' => $driverAccountType,
             'wallet_balance' => $role === 'customer' ? 20000 : 0,
             'is_available' => $role === 'driver',
             'membership' => 'Standard',
             'rating' => $role === 'driver' ? 0 : 4.80,
             'profile_status' => $role === 'customer' ? 'approved' : 'pending',
             'documents_status' => $role === 'customer' ? 'approved' : 'pending',
+            'pricing' => $role === 'driver' ? $this->emptyPricing() : null,
             'account_step' => 0,
         ]);
         if ($blocked = $this->blockedBanResponse($user)) {
@@ -353,6 +387,7 @@ class AuthController extends Controller
                 'name' => $name,
                 'first_name' => ucfirst($provider),
                 'last_name' => 'User',
+                'driver_account_type' => $role === 'driver' ? 'independent' : null,
                 'password' => Str::password(40),
                 'role' => in_array($role, ['customer', 'driver'], true) ? $role : 'customer',
                 'wallet_balance' => $role === 'customer' ? 20000 : 0,
@@ -361,6 +396,7 @@ class AuthController extends Controller
                 'rating' => $role === 'driver' ? 0 : 4.80,
                 'profile_status' => $role === 'customer' ? 'approved' : 'pending',
                 'documents_status' => $role === 'customer' ? 'approved' : 'pending',
+                'pricing' => $role === 'driver' ? $this->emptyPricing() : null,
                 'account_step' => 0,
             ]
         );
@@ -398,10 +434,12 @@ class AuthController extends Controller
                 'wallet_balance' => $role === 'customer' ? 20000 : 0,
                 'is_available' => $role === 'driver',
                 'first_name' => $name ?: ($role === 'driver' ? 'Laveur' : 'Client'),
+                'driver_account_type' => $role === 'driver' ? 'independent' : null,
                 'membership' => 'Standard',
                 'rating' => $role === 'driver' ? 0 : 4.80,
                 'profile_status' => $role === 'customer' ? 'approved' : 'pending',
                 'documents_status' => $role === 'customer' ? 'approved' : 'pending',
+                'pricing' => $role === 'driver' ? $this->emptyPricing() : null,
                 'account_step' => 0,
             ]
         );
@@ -431,6 +469,9 @@ class AuthController extends Controller
             'phone' => $user->phone,
             'email' => $user->email,
             'role' => $user->role,
+            'driver_account_type' => $user->driver_account_type,
+            'company_name' => $user->company_name,
+            'manager_name' => $user->manager_name,
             'wallet_balance' => $user->wallet_balance,
             'is_available' => $user->is_available,
             'bio' => $user->bio,
@@ -440,6 +481,8 @@ class AuthController extends Controller
             'profile_status' => $user->profile_status,
             'account_step' => $user->account_step,
             'documents' => collect($user->documents ?? [])->map(fn ($url) => $this->absoluteUrl($url))->all(),
+            'pricing' => $this->normalizedPricing($user->pricing),
+            'required_documents' => $user->role === 'driver' ? $this->requiredDriverDocuments($user) : [],
             'documents_status' => $user->documents_status,
             'is_banned' => (bool) $user->is_banned,
             'banned_at' => optional($user->banned_at)->toIso8601String(),
@@ -497,6 +540,41 @@ class AuthController extends Controller
         $avatarPath = $user->avatar_url ?: ($documents['profile'] ?? null);
 
         return $this->absoluteUrl($avatarPath);
+    }
+
+    private function requiredDriverDocuments(User $user): array
+    {
+        if (($user->driver_account_type ?? 'independent') === 'company') {
+            return ['profile', 'trade_register', 'manager_id', 'manager_photo'];
+        }
+
+        return ['id', 'profile', 'license', 'address', 'certificate'];
+    }
+
+    private function emptyPricing(): array
+    {
+        return [
+            'compacte' => ['exterior' => null, 'interior' => null, 'full' => null],
+            'berline' => ['exterior' => null, 'interior' => null, 'full' => null],
+            'suv' => ['exterior' => null, 'interior' => null, 'full' => null],
+        ];
+    }
+
+    private function normalizedPricing($pricing): array
+    {
+        $base = $this->emptyPricing();
+        if (!is_array($pricing)) {
+            return $base;
+        }
+
+        foreach ($base as $vehicle => $services) {
+            foreach ($services as $service => $default) {
+                $value = $pricing[$vehicle][$service] ?? $default;
+                $base[$vehicle][$service] = is_numeric($value) ? (int) round((float) $value) : null;
+            }
+        }
+
+        return $base;
     }
 
     private function blockedBanResponse(User $user)
