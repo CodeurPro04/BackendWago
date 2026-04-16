@@ -10,9 +10,8 @@ class ReferenceController extends Controller
     {
         return response()->json([
             'services' => [
-                ['key' => 'exterior', 'title' => 'Exterieur uniquement', 'price' => 2000],
-                ['key' => 'interior', 'title' => 'Interieur uniquement', 'price' => 2500],
-                ['key' => 'complete', 'title' => 'Lavage complet', 'price' => 4000],
+                ['key' => 'exterior', 'title' => 'Exterieur uniquement', 'price' => 5000],
+                ['key' => 'complete', 'title' => 'Lavage complet', 'price' => 10000],
             ],
             'vehicles' => ['Berline', 'Compacte', 'SUV'],
         ]);
