@@ -3,8 +3,10 @@
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\BookingController;
+use App\Http\Controllers\Api\CustomerWalletController;
 use App\Http\Controllers\Api\DriverJobController;
 use App\Http\Controllers\Api\DriverNotificationController;
+use App\Http\Controllers\Api\PaymentWebhookController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\ReferenceController;
 use Illuminate\Support\Facades\Route;
@@ -44,6 +46,10 @@ Route::post('/drivers/{driver}/device', [DriverNotificationController::class, 'r
 Route::post('/jobs/{booking}/accept', [DriverJobController::class, 'accept']);
 Route::post('/jobs/{booking}/decline', [DriverJobController::class, 'decline']);
 Route::post('/jobs/{booking}/transition', [DriverJobController::class, 'transition']);
+
+Route::post('/customers/{customer}/wallet/topups/wave', [CustomerWalletController::class, 'createWaveTopup']);
+Route::post('/customers/{customer}/wallet/withdrawals', [CustomerWalletController::class, 'createWithdrawal']);
+Route::post('/webhooks/geniuspay', [PaymentWebhookController::class, 'geniusPay']);
 
 Route::get('/admin/dashboard', [AdminController::class, 'dashboard']);
 Route::get('/admin/drivers', [AdminController::class, 'drivers']);
