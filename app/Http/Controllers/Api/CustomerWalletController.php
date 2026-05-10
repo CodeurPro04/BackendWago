@@ -155,7 +155,7 @@ class CustomerWalletController extends Controller
             'description' => ['nullable', 'string', 'max:255'],
         ]);
 
-        $walletId = trim((string) env('GENIUSPAY_PAYOUT_WALLET_ID', ''));
+        $walletId = trim((string) config('services.geniuspay.payout_wallet_id', ''));
         if ($walletId === '') {
             return response()->json([
                 'message' => 'Retrait indisponible (GENIUSPAY_PAYOUT_WALLET_ID manquant).',

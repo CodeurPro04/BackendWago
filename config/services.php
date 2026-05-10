@@ -35,4 +35,12 @@ return [
         ],
     ],
 
+    'geniuspay' => [
+        'api_key'            => env('GENIUSPAY_API_KEY', ''),
+        'merchant_base_url'  => env('GENIUSPAY_MERCHANT_BASE_URL', 'https://pay.genius.ci/api/v1/merchant'),
+        'webhook_secret'     => env('GENIUSPAY_WEBHOOK_SECRET', ''),
+        'payout_wallet_id'   => env('GENIUSPAY_PAYOUT_WALLET_ID', ''),
+        'confirm_on_return'  => env('GENIUSPAY_CONFIRM_ON_RETURN', false),
+    ],
+
 ];

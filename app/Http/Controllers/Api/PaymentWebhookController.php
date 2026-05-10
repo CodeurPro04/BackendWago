@@ -13,7 +13,7 @@ class PaymentWebhookController extends Controller
 {
     public function geniusPay(Request $request)
     {
-        $secret = trim((string) env('GENIUSPAY_WEBHOOK_SECRET', ''));
+        $secret = trim((string) config('services.geniuspay.webhook_secret', ''));
         if ($secret !== '') {
             $signatureHeader = $request->header('X-GeniusPay-Signature')
                 ?? $request->header('X-Signature')

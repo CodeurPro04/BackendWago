@@ -9,13 +9,13 @@ class GeniusPayService
 {
     private function baseUrl(): string
     {
-        $base = trim((string) env('GENIUSPAY_MERCHANT_BASE_URL', 'https://pay.genius.ci/api/v1/merchant'));
+        $base = trim((string) config('services.geniuspay.merchant_base_url', 'https://pay.genius.ci/api/v1/merchant'));
         return rtrim($base, '/');
     }
 
     private function apiKey(): string
     {
-        return trim((string) env('GENIUSPAY_API_KEY', ''));
+        return trim((string) config('services.geniuspay.api_key', ''));
     }
 
     /**

@@ -45,7 +45,7 @@ class PaymentReturnController extends Controller
     private function confirmSandboxTopup(string $reference): void
     {
         $env = strtolower(trim((string) env('APP_ENV', 'production')));
-        $allow = $env !== 'production' || (bool) env('GENIUSPAY_CONFIRM_ON_RETURN', false);
+        $allow = $env !== 'production' || (bool) config('services.geniuspay.confirm_on_return', false);
         if (!$allow) {
             return;
         }
