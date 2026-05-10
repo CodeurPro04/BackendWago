@@ -42,6 +42,7 @@ return [
         'payout_wallet_id'   => env('GENIUSPAY_PAYOUT_WALLET_ID', ''),
         'confirm_on_return'  => env('GENIUSPAY_CONFIRM_ON_RETURN', false),
         'app_scheme'         => env('ZIWAGO_APP_SCHEME', 'ziwago'),
+        'proxy_secret'       => env('GENIUSPAY_PROXY_SECRET', ''),
     ],
 
 ];

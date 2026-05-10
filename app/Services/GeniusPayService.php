@@ -19,6 +19,12 @@ class GeniusPayService
         return trim((string) config('services.geniuspay.api_key', ''));
     }
 
+    private function proxyHeaders(): array
+    {
+        $secret = trim((string) config('services.geniuspay.proxy_secret', ''));
+        return $secret !== '' ? ['X-Proxy-Secret' => $secret] : [];
+    }
+
     /**
      * @param array{
      *   amount:int,
@@ -60,9 +66,7 @@ class GeniusPayService
             $response = Http::acceptJson()
                 ->timeout(20)
                 ->withToken($apiKey)
-                ->withHeaders([
-                    'X-API-Key' => $apiKey,
-                ])
+                ->withHeaders(array_merge(['X-API-Key' => $apiKey], $this->proxyHeaders()))
                 ->post($this->baseUrl() . '/payments', $payload)
                 ->throw();
         } catch (ConnectionException $exception) {
@@ -124,9 +128,7 @@ class GeniusPayService
             $response = Http::acceptJson()
                 ->timeout(25)
                 ->withToken($apiKey)
-                ->withHeaders([
-                    'X-API-Key' => $apiKey,
-                ])
+                ->withHeaders(array_merge(['X-API-Key' => $apiKey], $this->proxyHeaders()))
                 ->post($this->baseUrl() . '/payouts', $payload)
                 ->throw();
         } catch (ConnectionException $exception) {
