@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
 
@@ -64,6 +65,12 @@ class GeniusPayService
                 ])
                 ->post($this->baseUrl() . '/payments', $payload)
                 ->throw();
+        } catch (ConnectionException $exception) {
+            return [
+                'error' => 'GENIUSPAY_CONNECTION_FAILED',
+                'message' => 'Impossible de joindre le serveur de paiement. Vérifiez votre connexion.',
+                'detail' => $exception->getMessage(),
+            ];
         } catch (RequestException $exception) {
             $res = $exception->response;
             return [
@@ -122,6 +129,12 @@ class GeniusPayService
                 ])
                 ->post($this->baseUrl() . '/payouts', $payload)
                 ->throw();
+        } catch (ConnectionException $exception) {
+            return [
+                'error' => 'GENIUSPAY_CONNECTION_FAILED',
+                'message' => 'Impossible de joindre le serveur de paiement. Vérifiez votre connexion.',
+                'detail' => $exception->getMessage(),
+            ];
         } catch (RequestException $exception) {
             $res = $exception->response;
             return [

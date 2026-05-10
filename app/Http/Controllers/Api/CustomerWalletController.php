@@ -40,7 +40,7 @@ class CustomerWalletController extends Controller
         }
 
         $returnUrl = $validated['return_url'] ?? null;
-        $scheme = trim((string) env('ZIWAGO_APP_SCHEME', 'ziwago'));
+        $scheme = trim((string) config('services.geniuspay.app_scheme', 'ziwago'));
         $deepLinkTarget = $returnUrl ?: "{$scheme}://wallet/topup-callback";
 
         $appUrl = rtrim((string) config('app.url'), '/');
@@ -116,21 +116,25 @@ class CustomerWalletController extends Controller
             ], 502);
         }
 
-        DB::transaction(function () use ($customer, $payment, $reference, $validated) {
-            WalletTransaction::query()->create([
-                'user_id' => $customer->id,
-                'booking_id' => null,
-                'type' => 'topup_pending',
-                'amount' => (int) $validated['amount'],
-                'method' => 'wave',
-                'meta' => [
-                    'provider' => 'geniuspay',
-                    'reference' => $reference,
-                    'status' => 'pending',
-                    'provider_payload' => $payment,
-                ],
-            ]);
-        });
+        try {
+            DB::transaction(function () use ($customer, $payment, $reference, $validated) {
+                WalletTransaction::query()->create([
+                    'user_id' => $customer->id,
+                    'booking_id' => null,
+                    'type' => 'topup_pending',
+                    'amount' => (int) $validated['amount'],
+                    'method' => 'wave',
+                    'meta' => [
+                        'provider' => 'geniuspay',
+                        'reference' => $reference,
+                        'status' => 'pending',
+                        'provider_payload' => $payment,
+                    ],
+                ]);
+            });
+        } catch (\Throwable $e) {
+            Log::error('wallet:topup db error', ['reference' => $reference, 'error' => $e->getMessage()]);
+        }
 
         return response()->json([
             'reference' => $reference,
